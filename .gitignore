@@ -1,0 +1,11 @@
+build/
+.vscode/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.vcxproj*
+*.sln
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
