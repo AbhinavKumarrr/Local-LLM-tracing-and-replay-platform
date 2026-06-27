@@ -1,17 +1,21 @@
 #pragma once
 #include <vector>
+#include <cstddef>
 #include "metrics.hpp"
 
 class RingBuffer {
 private:
-    vector<Metrics> buffer;
-    int capacity;
-    int index;
+    std::vector<Metrics> buffer;
+    std::size_t capacity;
+    std::size_t start_index;
+    std::size_t count;
 
 public:
-    RingBuffer(int cap);
+    explicit RingBuffer(std::size_t cap);
 
-    void push(Metrics m);
-
-    vector<Metrics> getAll();
+    void push(const Metrics& m);
+    std::vector<Metrics> getAll() const;
+    std::size_t size() const;
+    bool empty() const;
+    std::size_t getCapacity() const;
 };

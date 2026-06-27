@@ -1,11 +1,17 @@
 #pragma once
 #include <string>
-using namespace std;
 
 struct Metrics {
-    string layer_name;
+    int event_id;
     int token_id;
-    float latency_ms;
-    float sparsity;
-    string tensor_shape;
+    std::string layer_name;
+    std::string submodule_name;
+    std::string tensor_shape;
+    std::string dtype;
+    double timestamp_ms;
+    double latency_ms;
+    double sparsity_rate;
+    double mean_activation;
+    double max_activation;
+    bool anomaly_flag;
 };
