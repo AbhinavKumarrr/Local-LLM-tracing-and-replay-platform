@@ -1,4 +1,4 @@
 #pragma once
 #include "ring_buffer.hpp"
 
-void renderUI(RingBuffer& rb);
+void renderUI(const RingBuffer& rb);

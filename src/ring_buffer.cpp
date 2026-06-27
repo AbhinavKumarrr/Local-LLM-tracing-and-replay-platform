@@ -8,7 +8,7 @@ void RingBuffer::push(const Metrics& m) {
 
     if (count < capacity) {
         buffer[(start_index + count) % capacity] = m;
-        count++;
+        ++count;
     } else {
         buffer[start_index] = m;
         start_index = (start_index + 1) % capacity;
