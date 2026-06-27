@@ -13,6 +13,5 @@ int main() {
     tracer.traceLayer(105, "layers.2", "attn", "[1, 32, 4096]", "float16", 21.133, 1.660, 0.560, 0.09, 1.80);
 
     runDashboard(rb);
-
     return 0;
 }
