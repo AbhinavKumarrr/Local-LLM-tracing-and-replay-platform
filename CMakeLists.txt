@@ -12,5 +12,6 @@ add_executable(traceformer
     src/ring_buffer.cpp
     src/metrics.cpp
     src/tracer.cpp
+    src/attention.cpp
     src/dashboard.cpp
 )

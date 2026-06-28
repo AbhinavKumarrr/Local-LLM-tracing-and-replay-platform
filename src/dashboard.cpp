@@ -1,4 +1,5 @@
 #include "../include/dashboard.hpp"
+#include "../include/attention.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -12,6 +13,8 @@
 #include <conio.h>
 #endif
 
+using namespace std;
+
 static void clearScreen() {
 #ifdef _WIN32
     system("cls");
@@ -20,45 +23,57 @@ static void clearScreen() {
 #endif
 }
 
-static std::string repeatChar(char c, std::size_t n) {
-    return std::string(n, c);
+static string repeatChar(char c, size_t n) {
+    return string(n, c);
 }
 
-static std::string fitText(const std::string& s, std::size_t width) {
+static string fitText(const string& s, size_t width) {
     if (s.size() >= width) return s.substr(0, width);
-    return s + std::string(width - s.size(), ' ');
+    return s + string(width - s.size(), ' ');
 }
 
-static std::string toFixed3(double v) {
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(3) << v;
+static string toFixed3(double v) {
+    ostringstream oss;
+    oss << fixed << setprecision(3) << v;
     return oss.str();
 }
 
-static std::string layerType(const std::string& submodule) {
+static string layerType(const string& submodule) {
     if (submodule == "attn") return "Attn (Self)";
     if (submodule == "mlp") return "MLP (SwiGLU)";
     return submodule;
 }
 
-static std::string computeDevice(bool anomaly) {
+static string computeDevice(bool anomaly) {
     return anomaly ? "CPU (Fallback)" : "CUDA [GPU 0]";
 }
 
-static bool matchesLayer(const Metrics& e, int selectedLayer) {
-    std::string target = "layers." + std::to_string(selectedLayer);
-    return e.layer_name.find(target) != std::string::npos;
-}
+static const Metrics* pickSelectedMetric(const vector<Metrics>& events, int selectedLayer) {
+    const string target = "layers." + to_string(selectedLayer);
 
-static const Metrics* pickSelectedMetric(const std::vector<Metrics>& events, int selectedLayer) {
     for (const auto& e : events) {
-        if (matchesLayer(e, selectedLayer)) return &e;
+        if (e.layer_name.find(target) != string::npos) {
+            return &e;
+        }
     }
+
     if (!events.empty()) return &events.back();
     return nullptr;
 }
 
-static void renderHelpBar(int focus) {
+static string cellForWeight(double w, double contrast) {
+    double v = w * contrast;
+    if (v > 1.0) v = 1.0;
+    if (v < 0.0) v = 0.0;
+
+    if (v >= 0.85) return "##";
+    if (v >= 0.65) return "++";
+    if (v >= 0.45) return "--";
+    if (v >= 0.25) return "..";
+    return "  ";
+}
+
+static void renderHelpBar(int focus, const AttentionState& attn) {
     static const char* names[] = {
         "1. MODEL TOPOLOGY",
         "2. LIVE PACKET STREAM",
@@ -67,185 +82,246 @@ static void renderHelpBar(int focus) {
         "5. ANOMALY LEDGER"
     };
 
-    std::cout << "[Tab]: Cycle Focus  |  [j/k]: Select Layer  |  [Q]: Quit App\n";
-    std::cout << "Focus: " << names[focus] << "\n\n";
+    cout << "[Tab]: Cycle Focus  |  [j/k]: Layer Nav or Pan  |  [h/l]: Pan  |  [+/-]: Contrast  |  [F]: Fullscreen  |  [Q]: Quit App\n";
+    cout << "Focus: " << names[focus] << "   "
+         << "[Matrix " << (attn.fullscreen ? "Fullscreen" : "Windowed") << "]\n\n";
 }
 
 static void renderTopology(int focus, int selectedLayer) {
-    std::cout << "+------------------------- 1. MODEL TOPOLOGY "
-              << (focus == 0 ? "[FOCUS ACTIVE]" : "")
-              << " -------------------------+\n";
+    cout << "+------------------------- 1. MODEL TOPOLOGY "
+         << (focus == 0 ? "[FOCUS ACTIVE]" : "")
+         << " -------------------------+\n";
 
-    std::cout << "| > llama-3-8b                                                     |\n";
-    std::cout << "|   > embed_tokens                                                  |\n";
-    std::cout << "|   > layers                                                        |\n";
+    cout << "| > llama-3-8b                                                     |\n";
+    cout << "|   > embed_tokens                                                  |\n";
+    cout << "|   > layers                                                        |\n";
 
     for (int i = 0; i < 3; ++i) {
         bool selected = (i == selectedLayer);
-        std::string prefix = selected ? "> " : "  ";
-
-        std::cout << "|   " << prefix << "layers." << i;
-        if (selected) std::cout << "  [Active Capture Target]";
-        std::cout << std::string(63 - (selected ? 0 : 2) - std::min<std::size_t>(50, 10 + (selected ? 24 : 0)), ' ')
-                  << "|\n";
+        cout << "|   " << (selected ? "> " : "  ") << "layers." << i;
+        if (selected) cout << "  [Active Capture Target]";
+        cout << string(55, ' ') << "|\n";
     }
 
-    std::cout << "+-------------------------------------------------------------------+\n";
+    cout << "+-------------------------------------------------------------------+\n";
 }
 
-static void renderStream(const std::vector<Metrics>& events, int focus) {
-    std::cout << "+---------------------- 2. LIVE PACKET STREAM "
-              << (focus == 1 ? "[FOCUS ACTIVE]" : "")
-              << " ----------------------+\n";
-    std::cout << "| ID   | TIMESTAMP   | LAYER TYPE     | COMPUTE DEVICE              |\n";
-    std::cout << "+------+-------------+----------------+-----------------------------+\n";
+static void renderStream(const vector<Metrics>& events, int focus) {
+    cout << "+---------------------- 2. LIVE PACKET STREAM "
+         << (focus == 1 ? "[FOCUS ACTIVE]" : "")
+         << " ----------------------+\n";
+    cout << "| ID   | TIMESTAMP   | LAYER TYPE     | COMPUTE DEVICE              |\n";
+    cout << "+------+-------------+----------------+-----------------------------+\n";
 
     for (const auto& e : events) {
-        std::string id = fitText(std::to_string(e.event_id), 4);
-        std::string ts = fitText(toFixed3(e.timestamp_ms), 11);
-        std::string type = fitText(layerType(e.submodule_name), 14);
-        std::string dev = fitText(computeDevice(e.anomaly_flag), 27);
+        string id = fitText(to_string(e.event_id), 4);
+        string ts = fitText(toFixed3(e.timestamp_ms), 11);
+        string type = fitText(layerType(e.submodule_name), 14);
+        string dev = fitText(computeDevice(e.anomaly_flag), 27);
 
-        std::cout << "| " << id << " | "
-                  << ts << " | "
-                  << type << " | "
-                  << dev << " |\n";
+        cout << "| " << id << " | "
+             << ts << " | "
+             << type << " | "
+             << dev << " |\n";
     }
 
     if (events.empty()) {
-        std::cout << "| No traced events yet.                                             |\n";
+        cout << "| No traced events yet.                                             |\n";
     }
 
-    std::cout << "+-------------------------------------------------------------------+\n";
+    cout << "+-------------------------------------------------------------------+\n";
 }
 
-static void renderAttentionPanel(int focus) {
-    std::cout << "+------------------- 3. ATTENTION MATRIX VISUALIZER "
-              << (focus == 2 ? "[FOCUS ACTIVE]" : "")
-              << " -------------------+\n";
+static void renderAttentionPanel(const AttentionState& state, int focus) {
+    cout << "+------------------- 3. ATTENTION MATRIX VISUALIZER "
+         << (focus == 2 ? "[FOCUS ACTIVE]" : "")
+         << " -------------------+\n";
 
-    std::cout << "| Tokens: [I] [want] [it] [to] [be] [keyboard] [driven]             |\n";
-    std::cout << "| Viewport Window: [0-7] x [0-7]                                    |\n";
-    std::cout << "|                                                                   |\n";
-    std::cout << "| [I]        ##   ..   ..   ..   ..   ..   ..                       |\n";
-    std::cout << "| [want]     ..   ##   ..   ..   ..   ..   ..                       |\n";
-    std::cout << "| [it]       ..   ..   ##   ..   ..   ..   ..                       |\n";
-    std::cout << "| [to]       ..   ..   ..   ##   ..   ..   ..                       |\n";
-    std::cout << "| [be]       ..   ..   ..   ..   ##   ..   ..                       |\n";
-    std::cout << "| [keyboard] ..   ..   ..   ..   ..   ##   ..                       |\n";
-    std::cout << "| [driven]   ..   ..   ..   ..   ..   ..   ##                       |\n";
-    std::cout << "|                                                                   |\n";
-    std::cout << "| [Focus + F]: Open Fullscreen                                       |\n";
-    std::cout << "| [Arrows/(h,j,k,l)]: Pan Matrix                                    |\n";
-    std::cout << "| [+/-]: Change Weight Contrast                                     |\n";
-    std::cout << "+-------------------------------------------------------------------+\n";
+    const int n = static_cast<int>(state.tokens.size());
+    const int row_start = state.row_offset;
+    const int col_start = state.col_offset;
+    const int row_end = min(n, row_start + state.window);
+    const int col_end = min(n, col_start + state.window);
+
+    cout << "| Tokens: ";
+    for (int j = col_start; j < col_end; ++j) {
+        cout << "[" << fitText(state.tokens[j], 8) << "] ";
+    }
+    cout << string(40, ' ') << "|\n";
+
+    cout << "| Viewport Window: [" << row_start << "-" << max(row_start, row_end - 1)
+         << "] x [" << col_start << "-" << max(col_start, col_end - 1) << "]";
+    if (state.fullscreen) cout << "   (Fullscreen)";
+    cout << string(25, ' ') << "|\n";
+
+    for (int i = row_start; i < row_end; ++i) {
+        cout << "| ";
+        cout << "[" << fitText(state.tokens[i], 8) << "] ";
+
+        for (int j = col_start; j < col_end; ++j) {
+            cout << cellForWeight(state.weights[i][j], state.contrast) << "  ";
+        }
+
+        cout << string(20, ' ') << "|\n";
+    }
+
+    cout << "|                                                           |\n";
+    cout << "| [Focus + F]: Open Fullscreen                              |\n";
+    cout << "| [Arrows/(h,j,k,l)]: Pan Matrix                            |\n";
+    cout << "| [+/-]: Change Weight Contrast                             |\n";
+    cout << "+-------------------------------------------------------------------+\n";
 }
 
 static void renderMetricsPanel(const Metrics* m, int focus) {
-    std::cout << "+----------------------- 4. RUNTIME METRICS INSPECTOR "
-              << (focus == 3 ? "[FOCUS ACTIVE]" : "")
-              << " -----------------------+\n";
+    cout << "+----------------------- 4. RUNTIME METRICS INSPECTOR "
+         << (focus == 3 ? "[FOCUS ACTIVE]" : "")
+         << " -----------------------+\n";
 
     if (!m) {
-        std::cout << "| No active selection.                                               |\n";
-        std::cout << "+-------------------------------------------------------------------+\n";
+        cout << "| No active selection.                                             |\n";
+        cout << "+-------------------------------------------------------------------+\n";
         return;
     }
 
     int filled = static_cast<int>(m->sparsity_rate * 20.0);
-    filled = std::clamp(filled, 0, 20);
+    filled = max(0, min(20, filled));
 
-    std::cout << "| Tensor Shape : " << fitText(m->tensor_shape, 20)
-              << "   Dtype: " << fitText(m->dtype, 8) << "             |\n";
-    std::cout << "| Layer        : " << fitText(m->layer_name, 20)
-              << "   Submodule: " << fitText(m->submodule_name, 10) << "        |\n";
+    cout << "| Tensor Shape : " << fitText(m->tensor_shape, 20)
+         << "   Dtype: " << fitText(m->dtype, 8) << "             |\n";
+    cout << "| Layer        : " << fitText(m->layer_name, 20)
+         << "   Submodule: " << fitText(m->submodule_name, 10) << "        |\n";
 
-    std::cout << "| Sparsity Rate: [";
-    for (int i = 0; i < 20; ++i) std::cout << (i < filled ? '#' : '.');
-    std::cout << "] " << std::fixed << std::setprecision(1) << (m->sparsity_rate * 100.0) << "%";
+    cout << "| Sparsity Rate: [";
+    for (int i = 0; i < 20; ++i) cout << (i < filled ? '#' : '.');
+    cout << "] " << fixed << setprecision(1) << (m->sparsity_rate * 100.0) << "%";
 
     if (m->latency_ms <= 1.6) {
-        std::cout << "   Latency Delta: " << std::fixed << std::setprecision(3) << m->latency_ms
-                  << " ms (Within Normal Bounds)";
+        cout << "   Latency Delta: " << fixed << setprecision(3) << m->latency_ms
+             << " ms (Within Normal Bounds)";
     } else {
-        std::cout << "   Latency Delta: " << std::fixed << std::setprecision(3) << m->latency_ms
-                  << " ms (High)";
+        cout << "   Latency Delta: " << fixed << setprecision(3) << m->latency_ms
+             << " ms (High)";
     }
-    std::cout << "          |\n";
+    cout << "          |\n";
 
-    std::cout << "| Mean Activation: " << std::fixed << std::setprecision(3) << m->mean_activation
-              << "   Max Activation: " << std::fixed << std::setprecision(3) << m->max_activation
-              << "                                |\n";
+    cout << "| Mean Activation: " << fixed << setprecision(3) << m->mean_activation
+         << "   Max Activation: " << fixed << setprecision(3) << m->max_activation
+         << "                                |\n";
 
-    std::cout << "+-------------------------------------------------------------------+\n";
+    cout << "+-------------------------------------------------------------------+\n";
 }
 
-static void renderAnomalyLedger(const std::vector<Metrics>& events, int focus) {
-    std::cout << "+----------------------- 5. NUMERICAL ANOMALY LEDGER "
-              << (focus == 4 ? "[FOCUS ACTIVE]" : "")
-              << " -----------------------+\n";
+static void renderAnomalyLedger(const vector<Metrics>& events, int focus) {
+    cout << "+----------------------- 5. NUMERICAL ANOMALY LEDGER "
+         << (focus == 4 ? "[FOCUS ACTIVE]" : "")
+         << " -----------------------+\n";
 
     bool any = false;
     for (const auto& e : events) {
         if (!e.anomaly_flag) continue;
         any = true;
 
-        std::cout << "| " << fitText(toFixed3(e.timestamp_ms), 11)
-                  << "  ALERT  "
-                  << fitText(e.layer_name, 10)
-                  << " / "
-                  << fitText(e.submodule_name, 6)
-                  << "  -> Max/Latency anomaly detected"
-                  << std::string(10, ' ') << "|\n";
+        cout << "| " << fitText(toFixed3(e.timestamp_ms), 11)
+             << "  ALERT  "
+             << fitText(e.layer_name, 10)
+             << " / "
+             << fitText(e.submodule_name, 6)
+             << "  -> Max/Latency anomaly detected"
+             << string(10, ' ') << "|\n";
     }
 
     if (!any) {
-        std::cout << "| No anomalies detected.                                             |\n";
+        cout << "| No anomalies detected.                                           |\n";
     }
 
-    std::cout << "+-------------------------------------------------------------------+\n";
+    cout << "+-------------------------------------------------------------------+\n";
 }
 
 void runDashboard(const RingBuffer& rb) {
     int focus = 0;
     int selectedLayer = 1;
+    AttentionState attention;
+    int attentionLayer = -1;
 
     while (true) {
-        clearScreen();
-
         const auto events = rb.getAll();
         const Metrics* selectedMetric = pickSelectedMetric(events, selectedLayer);
 
-        renderHelpBar(focus);
+        if (selectedMetric) {
+            if (attentionLayer != selectedLayer || attention.tokens.empty()) {
+                AttentionState fresh = buildAttentionState(*selectedMetric);
+                fresh.row_offset = attention.row_offset;
+                fresh.col_offset = attention.col_offset;
+                fresh.contrast = attention.contrast;
+                fresh.fullscreen = attention.fullscreen;
+                clampAttentionView(fresh);
+                attention = fresh;
+                attentionLayer = selectedLayer;
+            }
+        }
+
+        clearScreen();
+        renderHelpBar(focus, attention);
         renderTopology(focus, selectedLayer);
         renderStream(events, focus);
-        renderAttentionPanel(focus);
+        renderAttentionPanel(attention, focus);
         renderMetricsPanel(selectedMetric, focus);
         renderAnomalyLedger(events, focus);
 
-        std::cout << "\nSelected layer: layers." << selectedLayer
-                  << "   |   Focus index: " << focus
-                  << "   |   Press j/k to switch layer\n";
+        cout << "\nSelected layer: layers." << selectedLayer
+             << "   |   Focus index: " << focus
+             << "   |   Press j/k to switch layer or pan matrix\n";
 
 #ifdef _WIN32
         int ch = _getch();
 
-        if (ch == 9) {
+        if (ch == 0 || ch == 224) {
+            int arrow = _getch();
+            if (focus == 2) {
+                if (arrow == 72) panAttention(attention, -1, 0);      // Up
+                if (arrow == 80) panAttention(attention, 1, 0);       // Down
+                if (arrow == 75) panAttention(attention, 0, -1);      // Left
+                if (arrow == 77) panAttention(attention, 0, 1);       // Right
+                clampAttentionView(attention);
+            }
+        } else if (ch == 9) {
             focus = (focus + 1) % 5;
         } else if (ch == 'q' || ch == 'Q') {
             break;
-        } else if (ch == 'j' || ch == 'J') {
-            selectedLayer = (selectedLayer + 1) % 3;
-        } else if (ch == 'k' || ch == 'K') {
-            selectedLayer = (selectedLayer + 2) % 3;
+        } else if (ch == 'f' || ch == 'F') {
+            toggleFullscreen(attention);
+        } else if (ch == '+' || ch == '=') {
+            adjustContrast(attention, 0.10);
+        } else if (ch == '-' || ch == '_') {
+            adjustContrast(attention, -0.10);
+        } else if (focus == 2) {
+            if (ch == 'h' || ch == 'H') panAttention(attention, 0, -1);
+            else if (ch == 'l' || ch == 'L') panAttention(attention, 0, 1);
+            else if (ch == 'j' || ch == 'J') panAttention(attention, 1, 0);
+            else if (ch == 'k' || ch == 'K') panAttention(attention, -1, 0);
+            clampAttentionView(attention);
+        } else {
+            if (ch == 'j' || ch == 'J') selectedLayer = (selectedLayer + 1) % 3;
+            else if (ch == 'k' || ch == 'K') selectedLayer = (selectedLayer + 2) % 3;
         }
 #else
         char ch;
-        std::cin >> ch;
+        cin >> ch;
         if (ch == 'q' || ch == 'Q') break;
         if (ch == '\t') focus = (focus + 1) % 5;
-        if (ch == 'j' || ch == 'J') selectedLayer = (selectedLayer + 1) % 3;
-        if (ch == 'k' || ch == 'K') selectedLayer = (selectedLayer + 2) % 3;
+        if (ch == 'f' || ch == 'F') toggleFullscreen(attention);
+        if (ch == '+' || ch == '=') adjustContrast(attention, 0.10);
+        if (ch == '-' || ch == '_') adjustContrast(attention, -0.10);
+        if (focus == 2) {
+            if (ch == 'h' || ch == 'H') panAttention(attention, 0, -1);
+            else if (ch == 'l' || ch == 'L') panAttention(attention, 0, 1);
+            else if (ch == 'j' || ch == 'J') panAttention(attention, 1, 0);
+            else if (ch == 'k' || ch == 'K') panAttention(attention, -1, 0);
+            clampAttentionView(attention);
+        } else {
+            if (ch == 'j' || ch == 'J') selectedLayer = (selectedLayer + 1) % 3;
+            else if (ch == 'k' || ch == 'K') selectedLayer = (selectedLayer + 2) % 3;
+        }
 #endif
     }
 }
