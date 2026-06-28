@@ -3,7 +3,7 @@
 #include "../include/dashboard.hpp"
 
 int main() {
-    RingBuffer rb(5);
+    RingBuffer rb(64);
     Tracer tracer(rb);
 
     tracer.traceLayer(101, "layers.0", "attn", "[1, 32, 4096]", "float16", 21.114, 1.142, 0.542, 0.12, 1.45);

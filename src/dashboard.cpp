@@ -23,10 +23,6 @@ static void clearScreen() {
 #endif
 }
 
-static string repeatChar(char c, size_t n) {
-    return string(n, c);
-}
-
 static string fitText(const string& s, size_t width) {
     if (s.size() >= width) return s.substr(0, width);
     return s + string(width - s.size(), ' ');
@@ -46,6 +42,23 @@ static string layerType(const string& submodule) {
 
 static string computeDevice(bool anomaly) {
     return anomaly ? "CPU (Fallback)" : "CUDA [GPU 0]";
+}
+
+static int extractLayerIndex(const string& layer_name) {
+    string digits;
+    bool found = false;
+
+    for (char c : layer_name) {
+        if (c >= '0' && c <= '9') {
+            digits += c;
+            found = true;
+        } else if (found) {
+            break;
+        }
+    }
+
+    if (digits.empty()) return 0;
+    return stoi(digits);
 }
 
 static const Metrics* pickSelectedMetric(const vector<Metrics>& events, int selectedLayer) {
@@ -82,12 +95,12 @@ static void renderHelpBar(int focus, const AttentionState& attn) {
         "5. ANOMALY LEDGER"
     };
 
-    cout << "[Tab]: Cycle Focus  |  [j/k]: Layer Nav or Pan  |  [h/l]: Pan  |  [+/-]: Contrast  |  [F]: Fullscreen  |  [Q]: Quit App\n";
+    cout << "[Tab]: Cycle Focus  |  [j/k]: Move Cursor or Pan  |  [Space]: Select Layer  |  [h/l]: Pan  |  [+/-]: Contrast  |  [F]: Fullscreen  |  [Q]: Quit App\n";
     cout << "Focus: " << names[focus] << "   "
          << "[Matrix " << (attn.fullscreen ? "Fullscreen" : "Windowed") << "]\n\n";
 }
 
-static void renderTopology(int focus, int selectedLayer) {
+static void renderTopology(int focus, int cursorLayer, int selectedLayer) {
     cout << "+------------------------- 1. MODEL TOPOLOGY "
          << (focus == 0 ? "[FOCUS ACTIVE]" : "")
          << " -------------------------+\n";
@@ -97,10 +110,19 @@ static void renderTopology(int focus, int selectedLayer) {
     cout << "|   > layers                                                        |\n";
 
     for (int i = 0; i < 3; ++i) {
-        bool selected = (i == selectedLayer);
-        cout << "|   " << (selected ? "> " : "  ") << "layers." << i;
-        if (selected) cout << "  [Active Capture Target]";
-        cout << string(55, ' ') << "|\n";
+        bool cursor = (i == cursorLayer);
+        bool active = (i == selectedLayer);
+
+        cout << "|   " << (cursor ? ">" : " ") << " ";
+        cout << "layers." << i;
+
+        if (active) {
+            cout << "  [Active Capture Target]";
+        } else if (cursor) {
+            cout << "  [Cursor]";
+        }
+
+        cout << string(45, ' ') << "|\n";
     }
 
     cout << "+-------------------------------------------------------------------+\n";
@@ -147,12 +169,12 @@ static void renderAttentionPanel(const AttentionState& state, int focus) {
     for (int j = col_start; j < col_end; ++j) {
         cout << "[" << fitText(state.tokens[j], 8) << "] ";
     }
-    cout << string(40, ' ') << "|\n";
+    cout << string(32, ' ') << "|\n";
 
     cout << "| Viewport Window: [" << row_start << "-" << max(row_start, row_end - 1)
          << "] x [" << col_start << "-" << max(col_start, col_end - 1) << "]";
     if (state.fullscreen) cout << "   (Fullscreen)";
-    cout << string(25, ' ') << "|\n";
+    cout << string(20, ' ') << "|\n";
 
     for (int i = row_start; i < row_end; ++i) {
         cout << "| ";
@@ -162,13 +184,13 @@ static void renderAttentionPanel(const AttentionState& state, int focus) {
             cout << cellForWeight(state.weights[i][j], state.contrast) << "  ";
         }
 
-        cout << string(20, ' ') << "|\n";
+        cout << string(16, ' ') << "|\n";
     }
 
-    cout << "|                                                           |\n";
-    cout << "| [Focus + F]: Open Fullscreen                              |\n";
-    cout << "| [Arrows/(h,j,k,l)]: Pan Matrix                            |\n";
-    cout << "| [+/-]: Change Weight Contrast                             |\n";
+    cout << "|                                                                   |\n";
+    cout << "| [Focus + F]: Open Fullscreen                                       |\n";
+    cout << "| [Arrows/(h,j,k,l)]: Pan Matrix                                    |\n";
+    cout << "| [+/-]: Change Weight Contrast                                     |\n";
     cout << "+-------------------------------------------------------------------+\n";
 }
 
@@ -239,6 +261,7 @@ static void renderAnomalyLedger(const vector<Metrics>& events, int focus) {
 
 void runDashboard(const RingBuffer& rb) {
     int focus = 0;
+    int cursorLayer = 1;
     int selectedLayer = 1;
     AttentionState attention;
     int attentionLayer = -1;
@@ -248,7 +271,9 @@ void runDashboard(const RingBuffer& rb) {
         const Metrics* selectedMetric = pickSelectedMetric(events, selectedLayer);
 
         if (selectedMetric) {
-            if (attentionLayer != selectedLayer || attention.tokens.empty()) {
+            int metricLayer = extractLayerIndex(selectedMetric->layer_name);
+
+            if (attentionLayer != metricLayer || attention.tokens.empty()) {
                 AttentionState fresh = buildAttentionState(*selectedMetric);
                 fresh.row_offset = attention.row_offset;
                 fresh.col_offset = attention.col_offset;
@@ -256,21 +281,21 @@ void runDashboard(const RingBuffer& rb) {
                 fresh.fullscreen = attention.fullscreen;
                 clampAttentionView(fresh);
                 attention = fresh;
-                attentionLayer = selectedLayer;
+                attentionLayer = metricLayer;
             }
         }
 
         clearScreen();
         renderHelpBar(focus, attention);
-        renderTopology(focus, selectedLayer);
+        renderTopology(focus, cursorLayer, selectedLayer);
         renderStream(events, focus);
         renderAttentionPanel(attention, focus);
         renderMetricsPanel(selectedMetric, focus);
         renderAnomalyLedger(events, focus);
 
-        cout << "\nSelected layer: layers." << selectedLayer
-             << "   |   Focus index: " << focus
-             << "   |   Press j/k to switch layer or pan matrix\n";
+        cout << "\nCursor layer: layers." << cursorLayer
+             << "   |   Selected layer: layers." << selectedLayer
+             << "   |   Focus index: " << focus << "\n";
 
 #ifdef _WIN32
         int ch = _getch();
@@ -278,10 +303,10 @@ void runDashboard(const RingBuffer& rb) {
         if (ch == 0 || ch == 224) {
             int arrow = _getch();
             if (focus == 2) {
-                if (arrow == 72) panAttention(attention, -1, 0);      // Up
-                if (arrow == 80) panAttention(attention, 1, 0);       // Down
-                if (arrow == 75) panAttention(attention, 0, -1);      // Left
-                if (arrow == 77) panAttention(attention, 0, 1);       // Right
+                if (arrow == 72) panAttention(attention, -1, 0);
+                if (arrow == 80) panAttention(attention, 1, 0);
+                if (arrow == 75) panAttention(attention, 0, -1);
+                if (arrow == 77) panAttention(attention, 0, 1);
                 clampAttentionView(attention);
             }
         } else if (ch == 9) {
@@ -294,33 +319,41 @@ void runDashboard(const RingBuffer& rb) {
             adjustContrast(attention, 0.10);
         } else if (ch == '-' || ch == '_') {
             adjustContrast(attention, -0.10);
+        } else if (ch == ' ') {
+            if (focus == 0) {
+                selectedLayer = cursorLayer;
+            }
         } else if (focus == 2) {
             if (ch == 'h' || ch == 'H') panAttention(attention, 0, -1);
             else if (ch == 'l' || ch == 'L') panAttention(attention, 0, 1);
             else if (ch == 'j' || ch == 'J') panAttention(attention, 1, 0);
             else if (ch == 'k' || ch == 'K') panAttention(attention, -1, 0);
             clampAttentionView(attention);
-        } else {
-            if (ch == 'j' || ch == 'J') selectedLayer = (selectedLayer + 1) % 3;
-            else if (ch == 'k' || ch == 'K') selectedLayer = (selectedLayer + 2) % 3;
+        } else if (focus == 0) {
+            if (ch == 'j' || ch == 'J') cursorLayer = (cursorLayer + 1) % 3;
+            else if (ch == 'k' || ch == 'K') cursorLayer = (cursorLayer + 2) % 3;
         }
 #else
         char ch;
         cin >> ch;
+
         if (ch == 'q' || ch == 'Q') break;
         if (ch == '\t') focus = (focus + 1) % 5;
         if (ch == 'f' || ch == 'F') toggleFullscreen(attention);
         if (ch == '+' || ch == '=') adjustContrast(attention, 0.10);
         if (ch == '-' || ch == '_') adjustContrast(attention, -0.10);
-        if (focus == 2) {
+
+        if (ch == ' ' && focus == 0) {
+            selectedLayer = cursorLayer;
+        } else if (focus == 2) {
             if (ch == 'h' || ch == 'H') panAttention(attention, 0, -1);
             else if (ch == 'l' || ch == 'L') panAttention(attention, 0, 1);
             else if (ch == 'j' || ch == 'J') panAttention(attention, 1, 0);
             else if (ch == 'k' || ch == 'K') panAttention(attention, -1, 0);
             clampAttentionView(attention);
-        } else {
-            if (ch == 'j' || ch == 'J') selectedLayer = (selectedLayer + 1) % 3;
-            else if (ch == 'k' || ch == 'K') selectedLayer = (selectedLayer + 2) % 3;
+        } else if (focus == 0) {
+            if (ch == 'j' || ch == 'J') cursorLayer = (cursorLayer + 1) % 3;
+            else if (ch == 'k' || ch == 'K') cursorLayer = (cursorLayer + 2) % 3;
         }
 #endif
     }
