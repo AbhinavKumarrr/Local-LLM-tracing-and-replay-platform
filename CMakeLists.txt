@@ -14,4 +14,5 @@ add_executable(traceformer
     src/attention.cpp
     src/dashboard.cpp
     src/tracer.cpp
+    src/replay.cpp
 )
