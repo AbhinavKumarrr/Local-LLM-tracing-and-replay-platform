@@ -157,3 +157,8 @@ traceformer/
 │   ├── dashboard1/
 │   └── dashboard2/
 ├── CMakeLists.txt
+
+---
+## Author
+
+**Abhinav Kumar**
