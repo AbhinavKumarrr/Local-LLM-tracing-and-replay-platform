@@ -176,8 +176,8 @@ If your system uses a specific CMake path on Windows:
 
 ```bash
 cd build
-"C:\Program Files\CMake\bin\cmake.exe" ..
-"C:\Program Files\CMake\bin\cmake.exe" --build . --config Debug
+& "C:\Program Files\CMake\bin\cmake.exe" ..
+& "C:\Program Files\CMake\bin\cmake.exe" --build . --config Debug
 ```
 
 ---
