@@ -154,6 +154,8 @@ Therefore, this approach was rejected in favor of the final implementation.
 
 ---
 
+## How to run?
+
 ## Build Instructions
 
 ### Requirements
@@ -188,21 +190,6 @@ From the build directory:
 
 ```bash
 .\Debug\traceformer.exe
-```
-
-If the executable is created directly in the build folder on your system:
-
-```bash
-.\traceformer.exe
-```
-
----
-
-## Replay a Saved Session
-
-```bash
-.\Debug\traceformer.exe --record session.trace
-.\Debug\traceformer.exe --replay session.trace
 ```
 
 ---
