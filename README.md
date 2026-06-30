@@ -11,6 +11,14 @@ This repository focuses on:
 - replay of stored trace sessions
 - keyboard-driven terminal dashboard
 
+  ### Traceformer Dashboard Preview
+
+![Traceformer Dashboard 1](Screenshots/dashboard1/traceformer1.png)
+
+![Traceformer Dashboard 2](Screenshots/dashboard1/traceformer2.png)
+
+---
+
 ## Project Overview
 
 This project was built as a tracing and diagnostics platform for understanding how data flows through a transformer-style model.
@@ -101,15 +109,28 @@ Lists suspicious events such as:
 - high sparsity
 - NaN/Inf-like behavior
 
-## Screenshots
+---
 
-### Traceformer dashboard
-![Traceformer dashboard 1](Screenshots/dashboard1/traceformer1.png)
-![Traceformer dashboard 2](Screenshots/dashboard1/traceformer2.png)
+## Experimental Dashboard (LLMScope Variant)
 
-### Alternate dashboard (LLMScope)
-![LLMScope dashboard 1](Screenshots/dashboard2/llmscope1.png)
-![LLMScope dashboard 2](Screenshots/dashboard2/llmscope2.png)
+During development, I also built an alternative modular architecture called **LLMScope**, focused on deeper modular separation (`core`, `engine`, `tui`).
+
+This version explored:
+- modular tracing engine
+- separated core architecture
+- alternative dashboard rendering
+
+Although technically interesting, it introduced additional build complexity and did not provide better visualization quality than the final Traceformer dashboard.
+
+Therefore, this approach was rejected in favor of the final implementation.
+
+### LLMScope Screenshots
+
+![LLMScope 1](Screenshots/dashboard2/llmscope1.png)
+
+![LLMScope 2](Screenshots/dashboard2/llmscope2.png)
+
+---
 
 ## Project Structure
 
